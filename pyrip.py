@@ -12,7 +12,7 @@ from pyrip_lib import *
 def request_all_from_neighbor(sock):
     # create request packet
     rip_packet = res.RipPacket(res.RIP_COMMAND_REQUEST, 2, 0)
-    rip_packet.add_entry(0, 0, 0, 16)
+    rip_packet.add_entry(address=0, mask=0, nexthop=0, metric=16)
     print(rip_packet)
 
     # send request
@@ -73,10 +73,13 @@ def main(argv):
     #     react to other RIP router.
     # '''
 
+    request_all_from_neighbor(sock)
+
     # create response packet
     rip_packet = res.RipPacket(res.RIP_COMMAND_RESPONSE, 2)
     network30 = ipaddr.ip_network('172.16.30.0/24', False)
     rip_packet.add_entry(network=network30, nexthop=0, metric=1)
+    print(rip_packet)
     print(rip_packet[0])
 
     # send request
