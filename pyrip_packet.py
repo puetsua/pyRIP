@@ -3,6 +3,7 @@
 import sys
 import struct
 import socket
+import ipaddress as ipaddr
 
 from pyrip_lib import *
 
@@ -21,7 +22,7 @@ class RipRouteEntry(object):
         return struct.pack('!IIII',self.address,self.mask,self.nexthop,self.metric)
 
     def __repr__(self):
-        return '{:s}/{:d}: {:s} ({:d})'.format(INT2IP(self.address),MASK2PREFIXLEN(self.mask),INT2IP(self.nexthop),self.metric)
+        return '{:}/{:d}: {:} ({:d})'.format(ipaddr.ip_address(self.address),Mask2PrefixLen(self.mask),ipaddr.ip_address(self.nexthop),self.metric)
 
 class RipPacket(object):
     def __init__(self, cmd, version, family = 2, route_tag = 0):
@@ -32,7 +33,11 @@ class RipPacket(object):
         self.entry = []
         return
 
-    def add_entry(self, address, mask, nexthop, metric):
+    def add_entry(self, network=None, address=None, mask=None, nexthop=None, metric=0):
+        if not network is None:
+            address = int(network.network_address)
+            mask = int(network.netmask)
+
         if not (type(address) is int and 
                 type(mask) is int and 
                 type(nexthop) is int):
