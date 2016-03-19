@@ -50,12 +50,12 @@ def rip_update():
     global rip_running, rip_interfaces, rip_timer
 
     # check if we received anything
-    # for net, rif in rip_interfaces.items():
-    #     data = rif.recv()
-    #     if len(data) > 0:
-    #         rv = pkt.RipPacket()
-    #         rv.unpack()
-    #         print(data)
+    for net, rif in rip_interfaces.items():
+        data = rif.recv()
+        if len(data) > 0:
+            rv_pkt = pkt.RipPacket()
+            rv_pkt.unpack(data)
+            print(rv_pkt, rv_pkt.size)
 
     # check update timer
     if rip_timer['update'].is_expired:
@@ -63,8 +63,7 @@ def rip_update():
         rip_packet = pkt.RipPacket(pkt.RIP_COMMAND_RESPONSE, 2)
         network30 = ipaddr.ip_network('172.16.30.0/24', False)
         rip_packet.add_entry(network=network30, nexthop=0, metric=1)
-        print(rip_packet)
-        print(rip_packet[0])
+        print(rip_packet, rip_packet.size)
         for net, rif in rip_interfaces.items():
             rif.send_multicast(rip_packet.pack())
         rip_timer['update'].reset()

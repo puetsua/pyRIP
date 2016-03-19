@@ -8,7 +8,7 @@ import ipaddress as ipaddr
 from pyrip_lib import *
 
 class RipRouteEntry(object):
-    def __init__(self, address, mask, nexthop, metric, family = 2, route_tag = 0):
+    def __init__(self, address, mask, nexthop, metric, route_tag = 0, family = 2):
         assert(type(family) is int)
         assert(type(route_tag) is int)
         assert(type(address) is int)
@@ -36,6 +36,10 @@ class RipPacket(object):
         self.entry = []
         return
 
+    @property
+    def size(self):
+        return RIP_HEADER_SIZE + len(self.entry)*RIP_ENTRY_SIZE
+
     def add_entry(self, network=None, address=None, mask=None, nexthop=None, metric=0, family=2, route_tag=0):
         if not network is None:
             address = int(network.network_address)
@@ -46,7 +50,7 @@ class RipPacket(object):
                 type(nexthop) is int):
             return False
 
-        self.entry.append(RipRouteEntry(address, mask, nexthop, metric))
+        self.entry.append(RipRouteEntry(address, mask, nexthop, metric, route_tag, family))
         return True
 
     def remove_entry(self, address, mask, nexthop):
@@ -70,10 +74,16 @@ class RipPacket(object):
         packet = header + entries
         return packet
 
-    def unpack(self,data):
+    def unpack(self, data):
         hdr = data[:RIP_HEADER_SIZE]
         data = data[RIP_HEADER_SIZE:]
-        self.command, self.version, zero = struct.pack(RIP_HEADER_PACK_FORMAT,data)
+        self.command, self.version, zero = struct.unpack(RIP_HEADER_PACK_FORMAT, hdr)
+        while len(data) > 0 and len(data)%RIP_ENTRY_SIZE == 0:
+            ent = data[:RIP_ENTRY_SIZE]
+            data = data[RIP_ENTRY_SIZE:]
+            family, tag, address, mask, nexthop, metric = struct.unpack(RIP_ENTRY_PACK_FORMAT, ent)
+            self.entry.append(RipRouteEntry(address, mask, nexthop, metric, tag, family))
+
         return
 
     def __repr__(self):

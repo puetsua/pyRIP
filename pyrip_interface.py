@@ -1,5 +1,6 @@
 # pyrip_interface.py
 import sys
+import struct
 import socket
 import select
 import ipaddress as ipaddr
@@ -71,6 +72,13 @@ class RipInterface(object):
             self._error_code = ERR_SOCKET_FAILED
             self.sock = None
             self.socket_close()
+
+        # join multicast
+        mreq = struct.pack('4sl', socket.inet_aton(RIP_MULTICAST_ADDR), socket.INADDR_ANY)
+        self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+        # don't multicast to self
+        self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
         
     def socket_close(self):
         if self._error_code < 0:
