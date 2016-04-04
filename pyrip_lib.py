@@ -19,6 +19,9 @@ RIP_ENTRY_PACK_FORMAT   = '!HHIIII'
 RIP_MAX_ROUTE_ENTRY     = 25
 RIP_RECV_BUF_SIZE       = 41600
 
+# it's very unlikely to change in future
+RIP_ADDRESS_FAMILY      = 2 
+
 def Mask2PrefixLen(mask): 
     prefix = bin(mask).count('1')
     return prefix

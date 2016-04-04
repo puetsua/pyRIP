@@ -64,3 +64,5 @@ target/
 #sublime
 *.sublime-project
 *.sublime-workspace
+archive/
+note.txt

@@ -3,119 +3,146 @@ import sys
 import getopt
 import struct
 import socket
-import ipaddress as ipaddr
 import re
 
-import pyrip_timer as timer
-import pyrip_interface as iface
-import pyrip_packet as pkt
+from twisted.internet.protocol import DatagramProtocol
+from twisted.internet import reactor
+
 from pyrip_lib import *
 
-rip_running = False
-rip_interfaces = {}
-rip_timer = {}
+'''
+    Provides methods to handle RIP routes
+'''
+class RipRouteEntry(object):
+    def __init__(self, address, mask, nexthop, metric, route_tag=0, family=RIP_ADDRESS_FAMILY):
+        self.family = family
+        self.route_tag = route_tag
+        self.address = address
+        self.mask = mask
+        self.nexthop = nexthop
+        self.metric = metric
 
-def request_all_packet():
-    # create request packet
-    rip_packet = pkt.RipPacket(pkt.RIP_COMMAND_REQUEST, 2)
-    rip_packet.add_entry(
-        family = 0, 
-        route_tag = 0, 
-        address = 0, 
-        mask = 0, 
-        nexthop = 0, 
-        metric = 16)
-    print(rip_packet)
-    return rip_packet
+    def pack(self):
+        return struct.pack(RIP_ENTRY_PACK_FORMAT,self.family,self.route_tag,self.address,self.mask,self.nexthop,self.metric)
 
-def show_help():
-    print('pyrip.py -[hi]')
-    print('{:15s} {:30s}'.format('-{}, --{}'.format('h','help'), 
-            'To show all commands.'))
-    print('{:15s} {:30s}'.format('-{}, --{}'.format('i','network'), 
-            'Required, Enter a network. ie. 192.168.1.23/24'))
+    def __repr__(self):
+        return '{:}/{:d}: {:} ({:d})'.format(ipaddr.ip_address(self.address),Mask2PrefixLen(self.mask),ipaddr.ip_address(self.nexthop),self.metric)
 
-def rip_init():
-    global rip_running, rip_interfaces, rip_timer
+'''
+    Provides methods to handle RIP packets
+'''
+class RipPacket(object):
+    def __init__(self, cmd = RIP_COMMAND_RESPONSE, version = 2):
+        self.command = cmd
+        self.version = version
 
-    rip_running = True
-    pkt = request_all_packet()
+        self.entry = []
+        return
 
-    for net, rif in rip_interfaces.items():
-        rif.socket_open()
-        rif.send_multicast(pkt.pack())
-    rip_timer['update'] = timer.Timer(RIP_DEFAULT_UPDATE)
+    @property
+    def size(self):
+        return RIP_HEADER_SIZE + len(self.entry)*RIP_ENTRY_SIZE
 
-def rip_update():
-    global rip_running, rip_interfaces, rip_timer
+    def add_entry(self, network=None, address=None, mask=None, nexthop=None, metric=0, family=2, route_tag=0):
+        if not network is None:
+            address = int(network.network_address)
+            mask = int(network.netmask)
 
-    # check if we received anything
-    for net, rif in rip_interfaces.items():
-        rif.update()
+        if not (type(address) is int and 
+                type(mask) is int and 
+                type(nexthop) is int):
+            return False
 
-        data = rif.recv()
-        if len(data) > 0:
-            rv_pkt = pkt.RipPacket()
-            rv_pkt.unpack(data)
-            print('r', rv_pkt, rv_pkt.size)
+        self.entry.append(RipRouteEntry(address, mask, nexthop, metric, route_tag, family))
+        return True
 
-    # check update timer
-    if rip_timer['update'].is_expired:
-        # create response packet
-        rip_packet = pkt.RipPacket(pkt.RIP_COMMAND_RESPONSE, 2)
-        network30 = ipaddr.ip_network('172.16.30.0/24', False)
-        rip_packet.add_entry(network=network30, nexthop=0, metric=1)
-        print('s', rip_packet, rip_packet.size)
-        for net, rif in rip_interfaces.items():
-            rif.send_multicast(rip_packet.pack())
-        rip_timer['update'].reset()
+    def remove_entry(self, address, mask, nexthop):
+        for ent in self.entry:
+            if ent.address == ip_addr:
+                self.entry.remove(ent)
+                return True
+        return False
+    def __getitem__(self, key):
+        return self.entry[key]
 
-def rip_clean():
-    global rip_running, rip_interfaces, rip_timer
+    def pack(self):
+        header = struct.pack(RIP_HEADER_PACK_FORMAT,self.command,self.version,0)
+        entries = b''
+        for ent in self.entry:
+            entries = entries + ent.pack()
+        packet = header + entries
+        return packet
 
-    for net, rif in rip_interfaces.items():
-        rif.socket_close()
+    def unpack(self, data):
+        hdr = data[:RIP_HEADER_SIZE]
+        data = data[RIP_HEADER_SIZE:]
+        self.command, self.version, zero = struct.unpack(RIP_HEADER_PACK_FORMAT, hdr)
+        while len(data) > 0 and len(data)%RIP_ENTRY_SIZE == 0:
+            ent = data[:RIP_ENTRY_SIZE]
+            data = data[RIP_ENTRY_SIZE:]
+            family, tag, address, mask, nexthop, metric = struct.unpack(RIP_ENTRY_PACK_FORMAT, ent)
+            self.entry.append(RipRouteEntry(address, mask, nexthop, metric, tag, family))
+
+        return
+
+    def __repr__(self):
+        if self.command == RIP_COMMAND_REQUEST:
+            cmd = 'request'
+        elif self.command == RIP_COMMAND_RESPONSE:
+            cmd = 'response'
+
+        ret = 'v{:d}, {:s}, {:d} entries'.format(self.version,cmd,len(self.entry))
+        return ret
+
+'''
+    main RIP process. RIP version 2.
+    version 1 should be added in future.
+'''
+class RIP(DatagramProtocol):
+    def __init__(self):
+        self.ttl = 1 # link-local. Not going to follow history ttl=2.
+        #
+        reactor.callLater(RIP_DEFAULT_UPDATE, self.sendRegularUpdate)
+
+    def startProtocol(self):
+        self.transport.setTTL(self.ttl)
+        self.transport.joinGroup(RIP_MULTICAST_ADDR)
+        self.transport.setLoopbackMode(False)
+        self.transport.setBroadcastAllowed(True)
+        #
+        self.requestAllRoutes()
+
+    def datagramReceived(self, datagram, address):
+        print('Datagram received from {}'.format(repr(address)))
+        # handle received packets
+        # decodePacket(datagram)
+
+    def connectionRefused(self):
+        pass
+
+    def sendRegularUpdate(self):
+        # construct update packet
+        #self.transport.write(msg, ('<broadcast>', RIP_UDP_PORT))
+        reactor.callLater(RIP_DEFAULT_UPDATE, self.sendRegularUpdate)
+
+    def sendRequest(self, route):
+        # construct request packet
+        pass
+
+    def requestAllRoutes(self):
+        pkt = RipPacket(RIP_COMMAND_REQUEST, 2)
+        pkt.add_entry(
+            family = 0, 
+            route_tag = 0, 
+            address = 0, 
+            mask = 0, 
+            nexthop = 0, 
+            metric = 16)
+        self.transport.write(pkt.pack(), (RIP_MULTICAST_ADDR, RIP_UDP_PORT))
 
 def main(argv):
-    global rip_running, rip_interfaces, rip_timer
-
-    if len(argv) == 0:
-        show_help()
-        sys.exit()
-
-    try:
-        opts, args = getopt.getopt(argv,'hi:',['help','network='])
-    except getopt.GetoptError:
-        show_help()
-        sys.exit(2)
-
-    for opt, arg in opts:
-        if opt == '-h':
-            show_help()
-            sys.exit()
-        elif opt in ('-i', '--network'):
-            network = arg
-
-    if network == None:
-        show_help()
-        sys.exit()
-
-    try:
-        address, prefixlen = network.split('/');
-    except ValueError:
-        print('Invalid network format.')
-        sys.exit()
-
-    address = ipaddr.ip_address(address)
-    network = ipaddr.ip_network(network, False)
-
-    rip_interfaces[network] = iface.RipInterface(address, network)
-
-    # main RIP process
-    rip_init()
-    while rip_running:
-        rip_update()
-    rip_clean()
+    reactor.listenMulticast(RIP_UDP_PORT, RIP(), listenMultiple=True)
+    reactor.run()
 
 if __name__ == '__main__':
     main(sys.argv[1:])
