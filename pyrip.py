@@ -70,7 +70,7 @@ class RipPacket(object):
 
     def removeEntry(self, prefix, prefixLen, nextHop):
         for ent in self.entry:
-            if ent.address == ip_addr:
+            if ent.prefix == prefix and ent.prefixLen == prefixLen and == ent.nextHop:
                 self.entry.remove(ent)
                 return True
         return False
