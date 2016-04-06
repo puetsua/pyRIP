@@ -13,15 +13,20 @@ from pyrip_lib import *
 '''
     Provides methods to handle RIP routes
 '''
-class RipRouteEntry(object):
+class RipRoute(object):
     def __init__(self, prefix, prefixLen, nextHop, metric, routeTag, family=RIP_ADDRESS_FAMILY):
         self.family = family
         self.routeTag = routeTag
         self.prefix = prefix
         self.prefixLen = prefixLen
-        self.nextHop = nextHop
-        self.metric = metric
-
+        self.nextHop = nextHop      
+        if metric >= RIP_METRIC_INFINITY:
+            self.metric = RIP_METRIC_INFINITY
+            self.flagDead = True
+        else:
+            self.metric = metric
+            self.flagDead = False
+        
     def pack(self):
         mask = PrefixLen2MaskInt(self.prefixLen)
         return struct.pack(RIP_ENTRY_PACK_FORMAT,
@@ -60,17 +65,17 @@ class RipPacket(object):
             ent = data[:RIP_ENTRY_SIZE]
             data = data[RIP_ENTRY_SIZE:]
             family, tag, prefix, mask, nextHop, metric = struct.unpack(RIP_ENTRY_PACK_FORMAT, ent)
-            pkt.entry.append(RipRouteEntry(
+            pkt.entry.append(RipRoute(
                 prefix, MaskInt2PrefixLen(mask), nextHop, metric, tag, family))
         return pkt
 
     def addEntry(self, prefix, prefixLen, nextHop, metric, routeTag=0, family=RIP_ADDRESS_FAMILY):
-        self.entry.append(RipRouteEntry(prefix, prefixLen, nextHop, metric, routeTag, family))
+        self.entry.append(RipRoute(prefix, prefixLen, nextHop, metric, routeTag, family))
         return True
 
     def removeEntry(self, prefix, prefixLen, nextHop):
         for ent in self.entry:
-            if ent.prefix == prefix and ent.prefixLen == prefixLen and == ent.nextHop:
+            if ent.prefix == prefix and ent.prefixLen == prefixLen and ent.nextHop == nextHop:
                 self.entry.remove(ent)
                 return True
         return False
@@ -100,6 +105,7 @@ class RIP(DatagramProtocol):
         self.updateTime = RIP_DEFAULT_UPDATE
         self.jitterScale = RIP_DEFAULT_JITTER_SCALE
         self.loadConfigurationFile()
+        self.RIB = []
 
     ''' Twisted Functions '''
     def startProtocol(self):
@@ -110,6 +116,12 @@ class RIP(DatagramProtocol):
         #
         self.requestAllRoutes()
         reactor.callLater(self.getUpdateTime(), self.sendRegularUpdate)
+        # examples
+        self.addRouteToRIB(RipRoute(IP2Int('155.13.55.0'), 24, IP2Int('192.168.223.1'), 15, 0))
+        self.addRouteToRIB(RipRoute(IP2Int('155.13.1.0'), 24, IP2Int('192.168.223.1'), 1, 0))
+        self.addRouteToRIB(RipRoute(IP2Int('160.15.2.0'), 24, IP2Int('192.168.223.1'), 2, 1))
+        self.addRouteToRIB(RipRoute(IP2Int('160.16.1.0'), 24, IP2Int('192.168.223.1'), 14, 2))
+        self.addRouteToRIB(RipRoute(IP2Int('196.55.0.0'), 16, IP2Int('192.168.223.1'), 19, 0))
 
     def datagramReceived(self, datagram, address):
         pkt = RipPacket.unpack(datagram)
@@ -127,7 +139,8 @@ class RIP(DatagramProtocol):
 
     def sendRegularUpdate(self):
         pkt = RipPacket(RIP_COMMAND_RESPONSE, 2)
-        pkt.addEntry(IP2Int('172.16.30.0'), 24, 0, 1) # TODO
+        for r in self.RIB:
+            pkt.addEntry(r.prefix, r.prefixLen, r.nextHop, r.metric)
         print('s', pkt, pkt.size)
         self.transport.write(pkt.pack(), (RIP_MULTICAST_ADDR, RIP_UDP_PORT))
         reactor.callLater(self.getUpdateTime(), self.sendRegularUpdate)
@@ -147,6 +160,29 @@ class RIP(DatagramProtocol):
             routeTag = 0)
         print('s', pkt)
         self.transport.write(pkt.pack(), (RIP_MULTICAST_ADDR, RIP_UDP_PORT))
+
+    def addRouteToRIB(self, route):
+        for i in range(0,len(self.RIB)):
+            if self.RIB[i].prefix >= route.prefix:
+                self.RIB.insert(i, route)
+                return
+        self.RIB.append(route)
+
+    def deleteRouteFromRIB(self, route):
+        if len(self.RIB) == 0:
+            warn('Nothing to delete in RIB.')
+            return
+        for i in range(0,len(self.RIB)):
+            if self.RIB[i] == route:
+                self.RIB.pop(i)
+
+    def refreshRIB(self):
+        for r in self.RIB:
+            if r.metric >= RIP_METRIC_INFINITY:
+                r.metric = RIP_METRIC_INFINITY
+                r.flagDead = True
+            else:
+                r.flagDead = False
 
 def main(argv):
     reactor.listenMulticast(RIP_UDP_PORT, RIP(), listenMultiple=True)
