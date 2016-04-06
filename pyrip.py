@@ -140,7 +140,8 @@ class RIP(DatagramProtocol):
     def sendRegularUpdate(self):
         pkt = RipPacket(RIP_COMMAND_RESPONSE, 2)
         for r in self.RIB:
-            pkt.addEntry(r.prefix, r.prefixLen, r.nextHop, r.metric)
+            if r.metric < RIP_METRIC_INFINITY-1:
+                pkt.addEntry(r.prefix, r.prefixLen, r.nextHop, r.metric)
         print('s', pkt, pkt.size)
         self.transport.write(pkt.pack(), (RIP_MULTICAST_ADDR, RIP_UDP_PORT))
         reactor.callLater(self.getUpdateTime(), self.sendRegularUpdate)
