@@ -19,10 +19,14 @@ class RipRoute(object):
         self.routeTag = routeTag
         self.prefix = prefix
         self.prefixLen = prefixLen
-        self.nextHop = nextHop      
+        self.nextHop = nextHop
+        
         if metric >= RIP_METRIC_INFINITY:
             self.metric = RIP_METRIC_INFINITY
             self.flagDead = True
+        elif metric <= RIP_METRIC_MIN:
+            self.metric = RIP_METRIC_MIN
+            self.flagDead = False
         else:
             self.metric = metric
             self.flagDead = False
@@ -140,7 +144,7 @@ class RIP(DatagramProtocol):
     def sendRegularUpdate(self):
         pkt = RipPacket(RIP_COMMAND_RESPONSE, 2)
         for r in self.RIB:
-            if r.metric < RIP_METRIC_INFINITY-1:
+            if r.metric < RIP_METRIC_MAX:
                 pkt.addEntry(r.prefix, r.prefixLen, r.nextHop, r.metric)
         print('s', pkt, pkt.size)
         self.transport.write(pkt.pack(), (RIP_MULTICAST_ADDR, RIP_UDP_PORT))
