@@ -160,8 +160,13 @@ class RIP(DatagramProtocol):
         for r in self.RIB:
             if r.metric < RIP_METRIC_MAX:
                 pkt.addEntry(r.prefix, r.prefixLen, r.nextHop, r.metric)
-        print('s', pkt, pkt.size)
-        self.transport.write(pkt.pack(), (RIP_MULTICAST_ADDR, RIP_UDP_PORT))
+
+        if len(pkt.entry) > 0:
+            print('s', pkt, pkt.size)
+            self.transport.write(pkt.pack(), (RIP_MULTICAST_ADDR, RIP_UDP_PORT))
+        else:
+            print('s No valid entry to send update packet.')
+
         reactor.callLater(self.getUpdateTime(), self.sendRegularUpdate)
 
     def sendRequest(self, route):
