@@ -4,6 +4,7 @@ import getopt
 import struct
 import socket
 import random
+import json
 
 from twisted.internet.protocol import DatagramProtocol
 from twisted.internet import reactor
@@ -104,12 +105,12 @@ class RipPacket(object):
     version 1 should be added in future.
 '''
 class RIP(DatagramProtocol):
-    def __init__(self):
+    def __init__(self, inputDict):
         self.ttl = 1 # link-local. Not going to follow history ttl=2.
         self.updateTime = RIP_DEFAULT_UPDATE
         self.jitterScale = RIP_DEFAULT_JITTER_SCALE
-        self.loadConfigurationFile()
         self.RIB = []
+        self.loadConfigurationFile(inputDict['configFileName'])
 
     ''' Twisted Functions '''
     def startProtocol(self):
@@ -120,12 +121,6 @@ class RIP(DatagramProtocol):
         #
         self.requestAllRoutes()
         reactor.callLater(self.getUpdateTime(), self.sendRegularUpdate)
-        # examples
-        self.addRouteToRIB(RipRoute(IP2Int('155.13.55.0'), 24, IP2Int('192.168.223.1'), 15, 0))
-        self.addRouteToRIB(RipRoute(IP2Int('155.13.1.0'), 24, IP2Int('192.168.223.1'), 1, 0))
-        self.addRouteToRIB(RipRoute(IP2Int('160.15.2.0'), 24, IP2Int('192.168.223.1'), 2, 1))
-        self.addRouteToRIB(RipRoute(IP2Int('160.16.1.0'), 24, IP2Int('192.168.223.1'), 14, 2))
-        self.addRouteToRIB(RipRoute(IP2Int('196.55.0.0'), 16, IP2Int('192.168.223.1'), 19, 0))
 
     def datagramReceived(self, datagram, address):
         pkt = RipPacket.unpack(datagram)
@@ -135,8 +130,27 @@ class RIP(DatagramProtocol):
         pass
 
     ''' RIP Functions '''
-    def loadConfigurationFile(self):
-        pass
+    def loadConfigurationFile(self, filename):
+        with open(filename, 'r') as f:
+            conf = json.load(f)
+
+        if 'updateTimer' in conf:
+            self.updateTime = int(conf['updateTimer'])
+        if 'routes' in conf:
+            for r in conf['routes']:
+                if set(r.keys()).issuperset(set(('prefix', 'prefixLen', 'nextHop'))):
+                    metric = 1
+                    rtag = 0
+                    if 'metric' in r:
+                        metric = int(r['metric'])
+                    if 'routeTag' in r:
+                        rtag = int(r['routeTag'])
+                    self.addRouteToRIB(RipRoute(
+                        IP2Int(r['prefix']), 
+                        int(r['prefixLen']), 
+                        IP2Int(r['nextHop']), 
+                        metric, rtag))
+
 
     def getUpdateTime(self):
         return self.updateTime + (random.random()*2-1)*self.updateTime*self.jitterScale
@@ -189,8 +203,36 @@ class RIP(DatagramProtocol):
             else:
                 r.flagDead = False
 
+'''
+    Show available options and details about this program.
+'''
+def showHelp():
+    print('pyrip.py configFile')
+
+'''
+    Parse input arguments into dictionary.
+'''
+def inputParser(argv):
+    inputDict = {}
+
+    try:
+        opts, args = getopt.getopt(argv,'h',['help'])
+    except getopt.GetoptError:
+        showHelp()
+        sys.exit(2)
+
+    for opt, arg in opts:
+        if opt == '-h':
+            showHelp()
+            sys.exit()
+
+    inputDict['configFileName'] = 'pyrip.json'
+    if len(args) > 0:
+        inputDict['configFileName'] = args[0]
+    return inputDict
+
 def main(argv):
-    reactor.listenMulticast(RIP_UDP_PORT, RIP(), listenMultiple=True)
+    reactor.listenMulticast(RIP_UDP_PORT, RIP(inputParser(argv)), listenMultiple=True)
     reactor.run()
 
 if __name__ == '__main__':
