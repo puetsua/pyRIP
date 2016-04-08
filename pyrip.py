@@ -212,7 +212,7 @@ class RIP(DatagramProtocol):
     Show available options and details about this program.
 '''
 def showHelp():
-    print('pyrip.py configFile')
+    print('pyrip.py <configFile>')
 
 '''
     Parse input arguments into dictionary.
@@ -224,16 +224,18 @@ def inputParser(argv):
         opts, args = getopt.getopt(argv,'h',['help'])
     except getopt.GetoptError:
         showHelp()
-        sys.exit(2)
+        sys.exit()
 
     for opt, arg in opts:
         if opt == '-h':
             showHelp()
             sys.exit()
 
-    inputDict['configFileName'] = 'pyrip.json'
-    if len(args) > 0:
-        inputDict['configFileName'] = args[0]
+    if len(args) == 0:
+        showHelp()
+        sys.exit()
+
+    inputDict['configFileName'] = args[0]
     return inputDict
 
 def main(argv):
