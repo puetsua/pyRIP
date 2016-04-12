@@ -14,6 +14,7 @@ from pyrip_lib import *
 '''
     Provides methods to handle RIP routes
 '''
+# CODE REFACTOR REQUIRED
 class RipRoute(object):
     def __init__(self, prefix, prefixLen, nextHop, metric, routeTag, family=RIP_ADDRESS_FAMILY):
         self.family = family
@@ -126,6 +127,17 @@ class RIP(DatagramProtocol):
         pkt = RipPacket.unpack(datagram)
         print('r', pkt, repr(address))
 
+        # we only deal with RIPv2 now.
+        if pkt.version != 2:
+            return
+
+        if pkt.command == RIP_COMMAND_REQUEST:
+            respondToRequest(pkt.entry)
+        elif pkt.command == RIP_COMMAND_RESPONSE:    
+            for r in pkt.entry:
+                self.addRouteToRIB(r)
+            self.refreshRIB()
+
     def connectionRefused(self):
         pass
 
@@ -151,9 +163,12 @@ class RIP(DatagramProtocol):
                         IP2Int(r['nextHop']), 
                         metric, rtag))
 
-
     def getUpdateTime(self):
         return self.updateTime + (random.random()*2-1)*self.updateTime*self.jitterScale
+
+    def respondToRequest(self, routes):
+        # use unicast to respond
+        pass
 
     def sendRegularUpdate(self):
         pkt = RipPacket(RIP_COMMAND_RESPONSE, 2)
@@ -185,7 +200,24 @@ class RIP(DatagramProtocol):
         print('s', pkt)
         self.transport.write(pkt.pack(), (RIP_MULTICAST_ADDR, RIP_UDP_PORT))
 
+    # CODE REFACTOR REQUIRED
+    def verifyRoute(self, route):
+        # check netmask
+        # check prefix
+        # check next hop
+        if route.metric < RIP_METRIC_MIN or not route.family == RIP_ADDRESS_FAMILY:
+            return False
+        return True
+
+    # CODE REFACTOR REQUIRED
     def addRouteToRIB(self, route):
+        if self.verifyRoute(route) == False:
+            return
+
+        for r in self.RIB:
+            if r.prefix == route.prefix and r.prefixLen == route.prefixLen and r.nextHop == route.nextHop:
+                return
+
         for i in range(0,len(self.RIB)):
             if self.RIB[i].prefix >= route.prefix:
                 self.RIB.insert(i, route)
