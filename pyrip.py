@@ -14,32 +14,75 @@ from pyrip_lib import *
 '''
     Provides methods to handle RIP routes
 '''
-# CODE REFACTOR REQUIRED
-class RipRoute(object):
-    def __init__(self, prefix, prefixLen, nextHop, metric, routeTag, family=RIP_ADDRESS_FAMILY):
+class IRoute(object):
+    def __init__(self, prefix=0, prefixLen=0, nextHop=0, afi=0):
+        self.afi = afi
+        self.prefix = prefix
+        self.prefixLen = prefixLen
+        self.nextHop = nextHop
+
+    def __cmp__(self, other):
+        if self.afi < other.afi:
+            return -1
+        elif self.afi > other.afi:
+            return 1
+
+        if self.prefix < other.prefix:
+            return -1
+        elif self.prefix > other.prefix:
+            return 1
+
+        if self.prefixLen < other.prefixLen:
+            return -1
+        elif self.prefixLen > other.prefixLen:
+            return 1
+
+        if self.nextHop < other.nextHop:
+            return -1
+        elif self.nextHop > other.nextHop:
+            return 1
+
+        return 0
+
+    def __lt__(self, other):
+        return self.__cmp__(other)<0
+    def __le__(self, other):
+        return self.__cmp__(other)<=0
+    def __eq__(self, other):
+        return self.__cmp__(other)==0
+    def __ne__(self, other):
+        return self.__cmp__(other)!=0
+    def __gt__(self, other):
+        return self.__cmp__(other)>0
+    def __ge__(self, other):
+        return self.__cmp__(other)>=0
+
+class RipRoute(IRoute):
+    def __init__(self, prefix, prefixLen, nextHop, metric=RIP_METRIC_MIN, routeTag=0, family=RIP_ADDRESS_FAMILY):
         self.family = family
         self.routeTag = routeTag
         self.prefix = prefix
         self.prefixLen = prefixLen
         self.nextHop = nextHop
+        self.afi = 1 # IPv4
         
         if metric >= RIP_METRIC_INFINITY:
             self.metric = RIP_METRIC_INFINITY
-            self.flagDead = True
         elif metric <= RIP_METRIC_MIN:
             self.metric = RIP_METRIC_MIN
-            self.flagDead = False
         else:
             self.metric = metric
-            self.flagDead = False
         
     def pack(self):
         mask = PrefixLen2MaskInt(self.prefixLen)
         return struct.pack(RIP_ENTRY_PACK_FORMAT,
             self.family, self.routeTag, self.prefix, mask, self.nextHop, self.metric)
 
+    def __str__(self):
+        return '{'+'{:s}/{:d}, {:s}, {:d}, {:d}'.format(Int2IP(self.prefix), self.prefixLen, Int2IP(self.nextHop), self.metric, self.routeTag)+'}'
+
     def __repr__(self):
-        return '{:}/{:d}: {:} ({:d})'.format(Int2IP(self.prefix), self.prefixLen, Int2IP(self.nextHop), self.metric)
+        return '{:08x}/{:d}->{:08x} m{:d} t{:d}'.format(self.prefix, self.prefixLen, self.nextHop, self.metric, self.routeTag)
 
 '''
     Provides methods to handle RIP packets
@@ -123,20 +166,18 @@ class RIP(DatagramProtocol):
         self.requestAllRoutes()
         reactor.callLater(self.getUpdateTime(), self.sendRegularUpdate)
 
-    def datagramReceived(self, datagram, address):
+    def datagramReceived(self, datagram, addrPort):
         pkt = RipPacket.unpack(datagram)
-        print('r', pkt, repr(address))
+        print('r', pkt, repr(addrPort))
 
         # we only deal with RIPv2 now.
         if pkt.version != 2:
             return
 
         if pkt.command == RIP_COMMAND_REQUEST:
-            respondToRequest(pkt.entry)
-        elif pkt.command == RIP_COMMAND_RESPONSE:    
-            for r in pkt.entry:
-                self.addRouteToRIB(r)
-            self.refreshRIB()
+            self.respondToRequest(pkt.entry, addrPort[0])
+        elif pkt.command == RIP_COMMAND_RESPONSE: 
+            self.updateRIB(pkt.entry, addrPort[0])
 
     def connectionRefused(self):
         pass
@@ -147,28 +188,30 @@ class RIP(DatagramProtocol):
             conf = json.load(f)
 
         if 'updateTimer' in conf:
-            self.updateTime = int(conf['updateTimer'])
+            self.updateTime = conf['updateTimer']
         if 'routes' in conf:
             for r in conf['routes']:
-                if set(r.keys()).issuperset(set(('prefix', 'prefixLen', 'nextHop'))):
-                    metric = 1
-                    rtag = 0
-                    if 'metric' in r:
-                        metric = int(r['metric'])
-                    if 'routeTag' in r:
-                        rtag = int(r['routeTag'])
-                    self.addRouteToRIB(RipRoute(
-                        IP2Int(r['prefix']), 
-                        int(r['prefixLen']), 
-                        IP2Int(r['nextHop']), 
-                        metric, rtag))
+                if set(('prefix', 'prefixLen', 'nextHop')) <= set(r.keys()):
+                    prefix = IP2Int(r['prefix'])
+                    prefixLen = r['prefixLen']
+                    nextHop = IP2Int(r['nextHop'])
+                    metric = RIP_METRIC_MIN if 'metric' not in r.keys() else r['metric']
+                    rtag = 0 if 'routeTag' not in r.keys() else r['routeTag']
+                    self.addRouteToRIB(RipRoute(prefix, prefixLen, nextHop, metric, rtag))
 
     def getUpdateTime(self):
         return self.updateTime + (random.random()*2-1)*self.updateTime*self.jitterScale
 
-    def respondToRequest(self, routes):
+    def respondToRequest(self, routes, addr):
         # use unicast to respond
         pass
+
+    def updateRIB(self, routes, addr):
+        for r in routes:
+            if r.nextHop == 0:
+                r.nextHop = IP2Int(addr)
+            self.addRouteToRIB(r)
+        self.refreshRIB()
 
     def sendRegularUpdate(self):
         pkt = RipPacket(RIP_COMMAND_RESPONSE, 2)
@@ -190,15 +233,13 @@ class RIP(DatagramProtocol):
 
     def requestAllRoutes(self):
         pkt = RipPacket(RIP_COMMAND_REQUEST, 2)
-        pkt.addEntry(
-            prefix = 0, 
-            prefixLen = 0,
-            nextHop = 0, 
-            metric = 16,
-            family = 0, 
-            routeTag = 0)
+        pkt.addEntry(0, 0, 0, 16, 0, 0) # a special entry to request all routing table from neighbors.
         print('s', pkt)
         self.transport.write(pkt.pack(), (RIP_MULTICAST_ADDR, RIP_UDP_PORT))
+
+    def showRIB(self):
+        for r in self.RIB:
+            print(r)
 
     # CODE REFACTOR REQUIRED
     def verifyRoute(self, route):
@@ -209,17 +250,16 @@ class RIP(DatagramProtocol):
             return False
         return True
 
-    # CODE REFACTOR REQUIRED
     def addRouteToRIB(self, route):
         if self.verifyRoute(route) == False:
             return
 
         for r in self.RIB:
-            if r.prefix == route.prefix and r.prefixLen == route.prefixLen and r.nextHop == route.nextHop:
+            if r == route:
                 return
 
         for i in range(0,len(self.RIB)):
-            if self.RIB[i].prefix >= route.prefix:
+            if self.RIB[i] >= route:
                 self.RIB.insert(i, route)
                 return
         self.RIB.append(route)
@@ -236,9 +276,6 @@ class RIP(DatagramProtocol):
         for r in self.RIB:
             if r.metric >= RIP_METRIC_INFINITY:
                 r.metric = RIP_METRIC_INFINITY
-                r.flagDead = True
-            else:
-                r.flagDead = False
 
 '''
     Show available options and details about this program.
