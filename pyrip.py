@@ -2,6 +2,7 @@
 import sys
 import getopt
 import struct
+import time
 import socket
 import random
 import json
@@ -72,7 +73,7 @@ class RipRoute(IRoute):
             self.metric = RIP_METRIC_MIN
         else:
             self.metric = metric
-        
+
     def pack(self):
         mask = PrefixLen2MaskInt(self.prefixLen)
         return struct.pack(RIP_ENTRY_PACK_FORMAT,
@@ -152,6 +153,8 @@ class RIP(DatagramProtocol):
     def __init__(self, inputDict):
         self.ttl = 1 # link-local. Not going to follow history ttl=2.
         self.updateTime = RIP_DEFAULT_UPDATE
+        self.timeoutTime = RIP_DEFAULT_TIMEOUT
+        self.garbageTime = RIP_DEFAULT_GARBAGE
         self.jitterScale = RIP_DEFAULT_JITTER_SCALE
         self.RIB = []
         self.loadConfigurationFile(inputDict['configFileName'])
@@ -187,8 +190,13 @@ class RIP(DatagramProtocol):
         with open(filename, 'r') as f:
             conf = json.load(f)
 
-        if 'updateTimer' in conf:
-            self.updateTime = conf['updateTimer']
+        if 'updateTime' in conf:
+            self.updateTime = conf['updateTime']
+        if 'timeoutTime' in conf:
+            self.timeoutTime = conf['timeoutTime']
+        if 'garbageTime' in conf:
+            self.garbageTime = conf['garbageTime']
+
         if 'routes' in conf:
             for r in conf['routes']:
                 if set(('prefix', 'prefixLen', 'nextHop')) <= set(r.keys()):
@@ -226,6 +234,7 @@ class RIP(DatagramProtocol):
         else:
             print('s No valid entry to send update packet.')
 
+        self.showRIB()
         reactor.callLater(self.getUpdateTime(), self.sendRegularUpdate)
 
     # TODO
@@ -242,9 +251,35 @@ class RIP(DatagramProtocol):
     '''
         RIB database functions
     '''
-    def showRIB(self):
-        for r in self.RIB:
-            print(r)
+    def routeTimerSetup(self, route):
+        if route.metric == RIP_METRIC_INFINITY:
+            self.garbageRoute(route)
+        else:
+            route.timeoutTimer = reactor.callLater(self.timeoutTime, self.garbageRoute, route)
+            route.garbageTimer = None
+
+    def routeTimerReset(self, route):
+        if route.timeoutTimer:
+            route.timeoutTimer.reset(self.timeoutTime)
+        else:
+            route.timeoutTimer = reactor.callLater(self.timeoutTime, self.garbageRoute, route)
+            route.garbageTimer.cancel()
+            route.garbageTimer = None
+
+    def routeTimerTimeoutGet(self, route):
+        if route.timeoutTimer:
+            return int(route.timeoutTimer.getTime()-time.time())
+        return -1
+
+    def routeTimerGarbageGet(self, route):
+        if route.garbageTimer:
+            return int(route.garbageTimer.getTime()-time.time())
+        return -1
+
+    def garbageRoute(self, route):
+        route.timeoutTimer = None
+        route.metric = RIP_METRIC_INFINITY
+        route.garbageTimer = reactor.callLater(self.garbageTime, self.deleteRouteFromRIB, route)
 
     def verifyRoute(self, route):
         # check netmask
@@ -259,6 +294,10 @@ class RIP(DatagramProtocol):
 
         return True
 
+    def showRIB(self):
+        for r in self.RIB:
+            print(str(r)+' '+str(self.routeTimerTimeoutGet(r))+' '+str(self.routeTimerGarbageGet(r)))
+
     def addRouteToRIB(self, route):
         if self.verifyRoute(route) == False:
             return
@@ -266,6 +305,8 @@ class RIP(DatagramProtocol):
         for r in self.RIB:
             if r == route:
                 return
+
+        self.routeTimerSetup(route)
 
         for i in range(0,len(self.RIB)):
             if self.RIB[i] >= route:
@@ -277,9 +318,11 @@ class RIP(DatagramProtocol):
         if len(self.RIB) == 0:
             warn('Nothing to delete in RIB.')
             return
+
         for i in range(0,len(self.RIB)):
             if self.RIB[i] == route:
                 self.RIB.pop(i)
+
 
     def refreshRIB(self):
         for r in self.RIB:
