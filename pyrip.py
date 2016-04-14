@@ -202,6 +202,7 @@ class RIP(DatagramProtocol):
     def getUpdateTime(self):
         return self.updateTime + (random.random()*2-1)*self.updateTime*self.jitterScale
 
+    # TODO
     def respondToRequest(self, routes, addr):
         # use unicast to respond
         pass
@@ -227,6 +228,7 @@ class RIP(DatagramProtocol):
 
         reactor.callLater(self.getUpdateTime(), self.sendRegularUpdate)
 
+    # TODO
     def sendRequest(self, route):
         # construct request packet
         pass
@@ -237,17 +239,24 @@ class RIP(DatagramProtocol):
         print('s', pkt)
         self.transport.write(pkt.pack(), (RIP_MULTICAST_ADDR, RIP_UDP_PORT))
 
+    '''
+        RIB database functions
+    '''
     def showRIB(self):
         for r in self.RIB:
             print(r)
 
-    # CODE REFACTOR REQUIRED
     def verifyRoute(self, route):
         # check netmask
         # check prefix
         # check next hop
-        if route.metric < RIP_METRIC_MIN or not route.family == RIP_ADDRESS_FAMILY:
+
+        if route.metric < RIP_METRIC_MIN:
             return False
+
+        if not route.family == RIP_ADDRESS_FAMILY:
+            return False
+
         return True
 
     def addRouteToRIB(self, route):
