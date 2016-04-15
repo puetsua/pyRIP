@@ -234,7 +234,6 @@ class RIP(DatagramProtocol):
         else:
             print('s No valid entry to send update packet.')
 
-        self.showRIB()
         reactor.callLater(self.getUpdateTime(), self.sendRegularUpdate)
 
     # TODO

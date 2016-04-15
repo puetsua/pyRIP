@@ -1,7 +1,7 @@
 {
-    "updateTime": 5,
-    "timeoutTime": 20,
-    "garbageTime": 10,
+    "updateTime": 20,
+    "timeoutTime": 180,
+    "garbageTime": 120,
     "routes":
     [
         {
