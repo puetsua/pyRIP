@@ -9,17 +9,16 @@ Currently, pyRIP is capable of originating routes and redistribute them to neigh
 1. Regular update packets
 2. Routing Information Base
 3. JSON configuration file
+4. Handling incoming packets
 
 ## GOAL
 Implement RFC2453(RIPv2) and compatible with RFC1058(RIPv1)
 
 ## TODO
-1. Handling incoming packets, only v2
-2. Compatible with v1
-3. A module for handling interfaces
-4. Trigger update
-5. Split-Horizon and Poison Reverse
-6. RIPv2 Authentication
+1. Split-Horizon and Poison Reverse
+2. Trigger update
+3. Compatible with v1
+4. RIPv2 Authentication
 
 ## Reference
 * **RIPv2** [RFC 2453](http://tools.ietf.org/html/rfc2453)
