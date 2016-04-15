@@ -319,10 +319,9 @@ class RIP(DatagramProtocol):
             warn('Nothing to delete in RIB.')
             return
 
-        for i in range(0,len(self.RIB)):
-            if self.RIB[i] == route:
-                self.RIB.pop(i)
-
+        for r in self.RIB:
+            if r == route:
+                self.RIB.remove(r)
 
     def refreshRIB(self):
         for r in self.RIB:
