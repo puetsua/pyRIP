@@ -1,5 +1,5 @@
 # pyRIP
-![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg) ![Python](https://img.shields.io/badge/Python-3.5.1-blue.svg) ![Status](https://img.shields.io/badge/Status-Under Development-ff5533.svg)
+![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg) ![Python](https://img.shields.io/badge/Python-3.5.1-blue.svg) ![Status](https://img.shields.io/badge/Status-Under_Development-ff5533.svg)
 
 [pyRIP](https://github.com/hankofficer/pyRIP) is a personal Routing Information Protocol Implementation on Python. In order to get familiar with implementing a routing protocol, I opened this project on GitHub for the practice.
 
